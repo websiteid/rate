@@ -1,28 +1,24 @@
 const { Telegraf, Markup, session } = require('telegraf');
 const crypto = require('crypto');
 
-const userPapCooldown = new Map(); // Menyimpan userId dan waktu terakhir kirim pap
-const PAP_COOLDOWN_MS = 10 * 60 * 1000; // 10 menit dalam milidetik
-const PUBLIC_CHANNEL_ID = '-1002857800900'; // Ganti sesuai channel ID kamu
-
-const BOT_TOKEN = '7524016177:AAFbiGOiSNTQSNpuApObS44aq32pteQrcuI'; // Token bot
-const ADMIN_ID = 6468926488; // ID admin
+const userPapCooldown = new Map();
+const PAP_COOLDOWN_MS = 10 * 60 * 1000;
+const PUBLIC_CHANNEL_ID = '-1002857800900';
+const BOT_TOKEN = '7524016177:AAFbiGOiSNTQSNpuApObS44aq32pteQrcuI';
+const ADMIN_ID = 6468926488;
 
 const bot = new Telegraf(BOT_TOKEN);
 bot.use(session({ defaultSession: () => ({}) }));
 
-const mediaStore = new Map(); // Menyimpan data media berdasarkan token
+const mediaStore = new Map();
 
-// ===================== FUNGSI PEMBANTU: GENERATE TOKEN RANDOM =====================
 function generateToken(length = 4) {
   return crypto.randomBytes(length).toString('hex');
 }
 
-// ===================== HANDLER COMMAND /start =====================
-// Tampilkan menu utama dengan opsi Rate Pap atau Kirim Pap
 bot.start(async (ctx) => {
   try {
-    await ctx.deleteMessage().catch(() => {}); // Hapus pesan /start jika ada
+    await ctx.deleteMessage().catch(() => {});
     await ctx.reply(
       'Selamat datang! Pilih opsi:',
       Markup.inlineKeyboard([
@@ -35,10 +31,13 @@ bot.start(async (ctx) => {
   }
 });
 
-// ===================== HANDLER ACTION: MENU KIRIM PAP =====================
-// Tampilkan opsi kirim pap sebagai Anonim atau Identitas
 bot.action('KIRIM_PAP', async (ctx) => {
-  await ctx.answerCbQuery();
+  try {
+    await ctx.answerCbQuery();
+  } catch (err) {
+    console.warn('Gagal jawab callback (KIRIM_PAP):', err.description);
+  }
+
   try {
     await ctx.editMessageText(
       'Ingin kirim pap sebagai?',
@@ -52,23 +51,29 @@ bot.action('KIRIM_PAP', async (ctx) => {
   }
 });
 
-// ===================== HANDLER ACTION: PILIH MODE KIRIM PAP ANONIM =====================
 bot.action('KIRIM_ANON', async (ctx) => {
-  await ctx.answerCbQuery();
+  try {
+    await ctx.answerCbQuery();
+  } catch (err) {
+    console.warn('Gagal jawab callback (KIRIM_ANON):', err.description);
+  }
+
   ctx.session.kirimPap = { mode: 'Anonim', status: 'menunggu_media' };
   await ctx.editMessageText('✅ Kamu kirim sebagai: *Anonim*\nSekarang kirim media-nya.', { parse_mode: 'Markdown' });
 });
 
-// ===================== HANDLER ACTION: PILIH MODE KIRIM PAP DENGAN IDENTITAS =====================
 bot.action('KIRIM_ID', async (ctx) => {
-  await ctx.answerCbQuery();
+  try {
+    await ctx.answerCbQuery();
+  } catch (err) {
+    console.warn('Gagal jawab callback (KIRIM_ID):', err.description);
+  }
+
   const username = ctx.from.username ? `@${ctx.from.username}` : 'Tanpa Username';
   ctx.session.kirimPap = { mode: username, status: 'menunggu_media' };
   await ctx.editMessageText(`✅ Kamu kirim sebagai: *${username}*\nSekarang kirim media-nya.`, { parse_mode: 'Markdown' });
 });
 
-// ===================== HANDLER TERIMA MEDIA (photo, video, document) =====================
-// Cek cooldown, validasi session, simpan media dan kirim token ke admin dan channel
 bot.on(['photo', 'document', 'video'], async (ctx) => {
   const session = ctx.session.kirimPap;
   const now = Date.now();
@@ -85,7 +90,7 @@ bot.on(['photo', 'document', 'video'], async (ctx) => {
 
   let file, fileType;
   if (ctx.message.photo) {
-    file = ctx.message.photo.pop(); // Foto dengan resolusi tertinggi
+    file = ctx.message.photo.pop();
     fileType = 'photo';
   } else if (ctx.message.video) {
     file = ctx.message.video;
@@ -108,7 +113,7 @@ bot.on(['photo', 'document', 'video'], async (ctx) => {
     from: ctx.from.id,
     views: 0,
     maxViews: Infinity,
-    caption: ctx.message.caption || '',
+    caption: ctx.message.caption || '', // ✅ simpan caption
   });
 
   userPapCooldown.set(ctx.from.id, now);
@@ -122,26 +127,27 @@ bot.on(['photo', 'document', 'video'], async (ctx) => {
   );
 
   await bot.telegram.sendMessage(
-  PUBLIC_CHANNEL_ID,
-  `📸 Pap baru masuk!\n🔐 Token: <code>${token}</code>\n📝 Kirim token ini ke bot : @rate_seme_uke_bot`,
-  { parse_mode: 'HTML' }
-);
+    PUBLIC_CHANNEL_ID,
+    `📸 Pap baru masuk!\n🔐 Token: <code>${token}</code>\n📝 Kirim token ini ke bot : @rate_seme_uke_bot`,
+    { parse_mode: 'HTML' }
+  );
 });
 
-// ===================== HANDLER ACTION: MENU RATE PAP =====================
-// Mulai flow rating, minta input token pap
 bot.action('RATE_PAP', async (ctx) => {
-  await ctx.answerCbQuery();
+  try {
+    await ctx.answerCbQuery();
+  } catch (err) {
+    console.warn('Gagal jawab callback (RATE_PAP):', err.description);
+  }
+
   ctx.session.rating = { stage: 'menunggu_token' };
   await ctx.editMessageText('🔢 Masukkan token pap yang ingin kamu nilai:');
 });
 
-// ===================== HANDLER TEKS: PROSES RATING DAN PERINTAH /help =====================
 bot.on('text', async (ctx) => {
   const text = ctx.message.text.trim();
   const rating = ctx.session.rating;
 
-  // Jika perintah bantuan
   if (text.toLowerCase() === '/help') {
     const helpMessage = `
 🤖 *Bantuan Bot*
@@ -156,7 +162,6 @@ bot.on('text', async (ctx) => {
     return ctx.reply(helpMessage, { parse_mode: 'Markdown' });
   }
 
-  // Flow rating: menerima token pap untuk ditampilkan
   if (rating && rating.stage === 'menunggu_token') {
     const token = text;
     const data = mediaStore.get(token);
@@ -164,42 +169,29 @@ bot.on('text', async (ctx) => {
     if (!data) return ctx.reply('❌ Token tidak valid atau sudah habis.');
 
     const { fileId, fileType, mode, from, views, maxViews, caption: userCaption } = data;
-    const captionPrefix = mode.startsWith('@')
-  ? `📸 Pap oleh: [${mode}](https://t.me/${mode.slice(1)})`
-  : `📸 Pap oleh: *${mode}*`;
-
-const captionText = userCaption ? `\n📝 Catatan: ${userCaption}` : '';
-const fullCaption = captionPrefix + captionText;
-if (fileType === 'document') {
-  msg = await ctx.replyWithDocument(fileId, { caption: fullCaption, parse_mode: 'Markdown' });
-} else if (fileType === 'photo') {
-  msg = await ctx.replyWithPhoto(fileId, { caption: fullCaption, parse_mode: 'Markdown' });
-} else if (fileType === 'video') {
-  msg = await ctx.replyWithVideo(fileId, { caption: fullCaption, parse_mode: 'Markdown' });
-}
-
 
     ctx.session.ratedTokens = ctx.session.ratedTokens || [];
-
     if (ctx.session.ratedTokens.includes(token)) {
       return ctx.reply('⚠️ Kamu sudah menilai pap ini.');
     }
 
-    const caption = mode.startsWith('@')
+    const captionPrefix = mode.startsWith('@')
       ? `📸 Pap oleh: [${mode}](https://t.me/${mode.slice(1)})`
       : `📸 Pap oleh: *${mode}*`;
+
+    const captionText = userCaption ? `\n📝 Catatan: ${userCaption}` : '';
+    const fullCaption = captionPrefix + captionText;
 
     try {
       let msg;
       if (fileType === 'document') {
-        msg = await ctx.replyWithDocument(fileId, { caption, parse_mode: 'Markdown' });
+        msg = await ctx.replyWithDocument(fileId, { caption: fullCaption, parse_mode: 'Markdown' });
       } else if (fileType === 'photo') {
-        msg = await ctx.replyWithPhoto(fileId, { caption, parse_mode: 'Markdown' });
+        msg = await ctx.replyWithPhoto(fileId, { caption: fullCaption, parse_mode: 'Markdown' });
       } else if (fileType === 'video') {
-        msg = await ctx.replyWithVideo(fileId, { caption, parse_mode: 'Markdown' });
+        msg = await ctx.replyWithVideo(fileId, { caption: fullCaption, parse_mode: 'Markdown' });
       }
 
-      // Hapus pesan media setelah 5 detik
       setTimeout(() => {
         ctx.deleteMessage(msg.message_id).catch(() => {});
       }, 5000);
@@ -216,7 +208,6 @@ if (fileType === 'document') {
 
       await ctx.reply(`⏳ Foto ini akan dihapus dalam 5 detik.\nToken ini tersisa ${maxViews - data.views}x.`);
 
-      // Kirim tombol rating 1-10
       const buttons = Array.from({ length: 10 }, (_, i) =>
         Markup.button.callback(`${i + 1}`, `RATE_${i + 1}`)
       );
@@ -233,16 +224,17 @@ if (fileType === 'document') {
     return;
   }
 
-  // Jika perintah tidak dikenali dan bukan flow rating
   ctx.reply('⚠️ Perintah tidak dikenali. Ketik /help untuk daftar perintah yang tersedia.');
 });
 
-// ===================== HANDLER ACTION: TERIMA RATING ANGKA =====================
-// Validasi sesi rating dan kirim notifikasi ke pengirim asli pap
 bot.action(/^RATE_(\d+)$/, async (ctx) => {
-  await ctx.answerCbQuery();
+  try {
+    await ctx.answerCbQuery();
+  } catch (err) {
+    console.warn('Gagal jawab callback (RATE_X):', err.description);
+  }
 
-  const ratingValue = parseInt(ctx.match[1]); // Ambil angka dari callback data
+  const ratingValue = parseInt(ctx.match[1]);
   const sessionRating = ctx.session.rating;
 
   if (!sessionRating || sessionRating.stage !== 'menunggu_rating') {
@@ -252,12 +244,10 @@ bot.action(/^RATE_(\d+)$/, async (ctx) => {
   const token = sessionRating.token;
   const originalSenderId = sessionRating.from;
 
-  // Cegah user memberi rating pada pap sendiri
   if (ctx.from.id === originalSenderId) {
     return ctx.reply('⚠️ Kamu tidak bisa menilai pap kamu sendiri.');
   }
 
-  // Hapus session rating agar tidak bisa rating 2x
   delete ctx.session.rating;
 
   const rater = ctx.from.username
@@ -277,14 +267,11 @@ bot.action(/^RATE_(\d+)$/, async (ctx) => {
   }
 });
 
-// ===================== COMMAND /report: LAPORKAN PENYALAHGUNAAN TOKEN =====================
-// Kirim laporan ke admin berdasarkan token yang diberikan user
 bot.command('report', (ctx) => {
   const parts = ctx.message.text.split(' ');
   const token = parts[1];
 
   if (!token) return ctx.reply('⚠️ Gunakan format: /report TOKEN');
-
   if (!mediaStore.has(token)) return ctx.reply('❌ Token tidak ditemukan.');
 
   bot.telegram.sendMessage(
@@ -296,6 +283,5 @@ bot.command('report', (ctx) => {
   ctx.reply('✅ Laporan kamu telah dikirim ke admin.');
 });
 
-// ===================== JALANKAN BOT =====================
 bot.launch();
 console.log('🤖 Bot aktif!');
