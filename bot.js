@@ -108,6 +108,7 @@ bot.on(['photo', 'document', 'video'], async (ctx) => {
     from: ctx.from.id,
     views: 0,
     maxViews: Infinity,
+    caption: ctx.message.caption || '',
   });
 
   userPapCooldown.set(ctx.from.id, now);
@@ -162,7 +163,22 @@ bot.on('text', async (ctx) => {
 
     if (!data) return ctx.reply('❌ Token tidak valid atau sudah habis.');
 
-    const { fileId, fileType, mode, from, views, maxViews } = data;
+    const { fileId, fileType, mode, from, views, maxViews, caption: userCaption } = data;
+    const captionPrefix = mode.startsWith('@')
+  ? `📸 Pap oleh: [${mode}](https://t.me/${mode.slice(1)})`
+  : `📸 Pap oleh: *${mode}*`;
+
+const captionText = userCaption ? `\n📝 Catatan: ${userCaption}` : '';
+const fullCaption = captionPrefix + captionText;
+if (fileType === 'document') {
+  msg = await ctx.replyWithDocument(fileId, { caption: fullCaption, parse_mode: 'Markdown' });
+} else if (fileType === 'photo') {
+  msg = await ctx.replyWithPhoto(fileId, { caption: fullCaption, parse_mode: 'Markdown' });
+} else if (fileType === 'video') {
+  msg = await ctx.replyWithVideo(fileId, { caption: fullCaption, parse_mode: 'Markdown' });
+}
+
+
     ctx.session.ratedTokens = ctx.session.ratedTokens || [];
 
     if (ctx.session.ratedTokens.includes(token)) {
