@@ -3,6 +3,7 @@ const crypto = require('crypto');
 
 const userPapCooldown = new Map();
 const PAP_COOLDOWN_MS = 10 * 60 * 1000;
+const TOKEN_VALID_MS = 24 * 60 * 60 * 1000; // 24 jam
 const PUBLIC_CHANNEL_ID = '-1002857800900';
 const BOT_TOKEN = '7524016177:AAFbiGOiSNTQSNpuApObS44aq32pteQrcuI';
 const ADMIN_ID = 6468926488;
@@ -34,11 +35,6 @@ bot.start(async (ctx) => {
 bot.action('KIRIM_PAP', async (ctx) => {
   try {
     await ctx.answerCbQuery();
-  } catch (err) {
-    console.warn('Gagal jawab callback (KIRIM_PAP):', err.description);
-  }
-
-  try {
     await ctx.editMessageText(
       'Ingin kirim pap sebagai?',
       Markup.inlineKeyboard([
@@ -47,28 +43,18 @@ bot.action('KIRIM_PAP', async (ctx) => {
       ])
     );
   } catch (err) {
-    console.warn('Edit message gagal:', err.description);
+    console.warn('Gagal proses KIRIM_PAP:', err.description);
   }
 });
 
 bot.action('KIRIM_ANON', async (ctx) => {
-  try {
-    await ctx.answerCbQuery();
-  } catch (err) {
-    console.warn('Gagal jawab callback (KIRIM_ANON):', err.description);
-  }
-
+  await ctx.answerCbQuery();
   ctx.session.kirimPap = { mode: 'Anonim', status: 'menunggu_media' };
   await ctx.editMessageText('✅ Kamu kirim sebagai: *Anonim*\nSekarang kirim media-nya.', { parse_mode: 'Markdown' });
 });
 
 bot.action('KIRIM_ID', async (ctx) => {
-  try {
-    await ctx.answerCbQuery();
-  } catch (err) {
-    console.warn('Gagal jawab callback (KIRIM_ID):', err.description);
-  }
-
+  await ctx.answerCbQuery();
   const username = ctx.from.username ? `@${ctx.from.username}` : 'Tanpa Username';
   ctx.session.kirimPap = { mode: username, status: 'menunggu_media' };
   await ctx.editMessageText(`✅ Kamu kirim sebagai: *${username}*\nSekarang kirim media-nya.`, { parse_mode: 'Markdown' });
@@ -113,7 +99,8 @@ bot.on(['photo', 'document', 'video'], async (ctx) => {
     from: ctx.from.id,
     views: 0,
     maxViews: Infinity,
-    caption: ctx.message.caption || '', // ✅ simpan caption
+    caption: ctx.message.caption || '',
+    createdAt: Date.now(), // simpan waktu token dibuat
   });
 
   userPapCooldown.set(ctx.from.id, now);
@@ -136,12 +123,21 @@ bot.on(['photo', 'document', 'video'], async (ctx) => {
 bot.action('RATE_PAP', async (ctx) => {
   try {
     await ctx.answerCbQuery();
-  } catch (err) {
-    console.warn('Gagal jawab callback (RATE_PAP):', err.description);
-  }
+    ctx.session.rating = { stage: 'menunggu_token' };
 
-  ctx.session.rating = { stage: 'menunggu_token' };
-  await ctx.editMessageText('🔢 Masukkan token pap yang ingin kamu nilai:');
+    try {
+      await ctx.editMessageText('🔢 Masukkan token pap yang ingin kamu nilai:');
+    } catch (err) {
+      if (
+        !err.description.includes('message is not modified')
+      ) {
+        console.warn('Gagal edit pesan RATE_PAP:', err.description);
+      }
+      // Jika error karena pesan sama, abaikan
+    }
+  } catch (err) {
+    console.warn('Gagal proses RATE_PAP:', err.description);
+  }
 });
 
 bot.on('text', async (ctx) => {
@@ -168,6 +164,12 @@ bot.on('text', async (ctx) => {
 
     if (!data) return ctx.reply('❌ Token tidak valid atau sudah habis.');
 
+    const ageMs = Date.now() - data.createdAt;
+    if (ageMs > TOKEN_VALID_MS) {
+      mediaStore.delete(token);
+      return ctx.reply('⏳ Token ini sudah kedaluwarsa (lebih dari 24 jam).');
+    }
+
     const { fileId, fileType, mode, from, views, maxViews, caption: userCaption } = data;
 
     ctx.session.ratedTokens = ctx.session.ratedTokens || [];
@@ -178,7 +180,6 @@ bot.on('text', async (ctx) => {
     const captionPrefix = mode.startsWith('@')
       ? `📸 Pap oleh: [${mode}](https://t.me/${mode.slice(1)})`
       : `📸 Pap oleh: *${mode}*`;
-
     const captionText = userCaption ? `\n📝 Catatan: ${userCaption}` : '';
     const fullCaption = captionPrefix + captionText;
 
@@ -199,8 +200,6 @@ bot.on('text', async (ctx) => {
       data.views++;
       if (data.views >= maxViews) {
         mediaStore.delete(token);
-      } else {
-        mediaStore.set(token, data);
       }
 
       ctx.session.rating = { stage: 'menunggu_rating', token, from };
@@ -228,12 +227,7 @@ bot.on('text', async (ctx) => {
 });
 
 bot.action(/^RATE_(\d+)$/, async (ctx) => {
-  try {
-    await ctx.answerCbQuery();
-  } catch (err) {
-    console.warn('Gagal jawab callback (RATE_X):', err.description);
-  }
-
+  await ctx.answerCbQuery();
   const ratingValue = parseInt(ctx.match[1]);
   const sessionRating = ctx.session.rating;
 
@@ -282,6 +276,16 @@ bot.command('report', (ctx) => {
 
   ctx.reply('✅ Laporan kamu telah dikirim ke admin.');
 });
+
+// Optional: Hapus otomatis token yang kadaluarsa setiap 30 menit
+setInterval(() => {
+  const now = Date.now();
+  for (const [token, data] of mediaStore.entries()) {
+    if (now - data.createdAt > TOKEN_VALID_MS) {
+      mediaStore.delete(token);
+    }
+  }
+}, 30 * 60 * 1000); // setiap 30 menit
 
 bot.launch();
 console.log('🤖 Bot aktif!');
