@@ -17,21 +17,61 @@ function generateToken(length = 4) {
   return crypto.randomBytes(length).toString('hex');
 }
 
+// Fungsi untuk menampilkan menu utama
+async function showMainMenu(ctx) {
+  try {
+    if (ctx.updateType === 'callback_query') {
+      // Kalau dari tombol inline, edit pesan
+      await ctx.editMessageText(
+        'Selamat datang! Pilih opsi:',
+        Markup.inlineKeyboard([
+          [Markup.button.callback('📊 Rate Pap', 'RATE_PAP')],
+          [Markup.button.callback('📸 Kirim Pap', 'KIRIM_PAP')],
+          [Markup.button.callback('📨 Menfes', 'MENFES')],
+        ])
+      );
+    } else {
+      // Kalau bukan callback (misal /start), kirim pesan baru
+      await ctx.reply(
+        'Selamat datang! Pilih opsi:',
+        Markup.inlineKeyboard([
+          [Markup.button.callback('📊 Rate Pap', 'RATE_PAP')],
+          [Markup.button.callback('📸 Kirim Pap', 'KIRIM_PAP')],
+          [Markup.button.callback('📨 Menfes', 'MENFES')],
+          // Biasanya tombol kembali gak perlu di menu awal
+        ])
+      );
+    }
+  } catch (err) {
+    // Tangani error lain di sini jika perlu
+    throw err;
+  }
+}
+
+
+// === MENU AWAL ===
 bot.start(async (ctx) => {
   try {
     await ctx.deleteMessage().catch(() => {});
-    await ctx.reply(
-      'Selamat datang! Pilih opsi:',
-      Markup.inlineKeyboard([
-        [Markup.button.callback('📊 Rate Pap', 'RATE_PAP')],
-        [Markup.button.callback('📸 Kirim Pap', 'KIRIM_PAP')],
-      ])
-    );
+    await showMainMenu(ctx);
   } catch (err) {
     console.error('Start error:', err);
   }
 });
 
+// Handler tombol KEMBALI ke menu utama
+bot.action('BACK_TO_MENU', async (ctx) => {
+  await ctx.answerCbQuery();
+  try {
+    await showMainMenu(ctx);
+  } catch (err) {
+    if (!err.description.includes('message is not modified')) {
+      console.error('BACK_TO_MENU error:', err);
+    }
+  }
+});
+
+// === KIRIM PAP ===
 bot.action('KIRIM_PAP', async (ctx) => {
   try {
     await ctx.answerCbQuery();
@@ -40,6 +80,7 @@ bot.action('KIRIM_PAP', async (ctx) => {
       Markup.inlineKeyboard([
         [Markup.button.callback('🙈 Anonim', 'KIRIM_ANON')],
         [Markup.button.callback('🪪 Identitas', 'KIRIM_ID')],
+        [Markup.button.callback('🔙 Kembali', 'BACK_TO_MENU')],
       ])
     );
   } catch (err) {
@@ -100,7 +141,7 @@ bot.on(['photo', 'document', 'video'], async (ctx) => {
     views: 0,
     maxViews: Infinity,
     caption: ctx.message.caption || '',
-    createdAt: Date.now(), // simpan waktu token dibuat
+    createdAt: Date.now(),
   });
 
   userPapCooldown.set(ctx.from.id, now);
@@ -120,23 +161,17 @@ bot.on(['photo', 'document', 'video'], async (ctx) => {
   );
 });
 
+// === RATE PAP ===
 bot.action('RATE_PAP', async (ctx) => {
-  try {
-    await ctx.answerCbQuery();
-    ctx.session.rating = { stage: 'menunggu_token' };
+  await ctx.answerCbQuery();
+  ctx.session.rating = { stage: 'menunggu_token' };
 
-    try {
-      await ctx.editMessageText('🔢 Masukkan token pap yang ingin kamu nilai:');
-    } catch (err) {
-      if (
-        !err.description.includes('message is not modified')
-      ) {
-        console.warn('Gagal edit pesan RATE_PAP:', err.description);
-      }
-      // Jika error karena pesan sama, abaikan
-    }
+  try {
+    await ctx.editMessageText('🔢 Masukkan token pap yang ingin kamu nilai:');
   } catch (err) {
-    console.warn('Gagal proses RATE_PAP:', err.description);
+    if (!err.description.includes('message is not modified')) {
+      console.warn('Gagal edit pesan RATE_PAP:', err.description);
+    }
   }
 });
 
@@ -145,17 +180,43 @@ bot.on('text', async (ctx) => {
   const rating = ctx.session.rating;
 
   if (text.toLowerCase() === '/help') {
-    const helpMessage = `
-🤖 *Bantuan Bot*
+    return ctx.reply(`🤖 *Bantuan Bot*
 
 📸 /start - Mulai bot dan tampilkan menu utama  
 📩 /help - Tampilkan pesan bantuan ini  
 📸 Kirim Pap - Kirim media secara anonim atau dengan identitas  
 📊 Rate Pap - Beri rating pada pap dengan token yang diberikan admin  
+📨 Menfes - Kirim pesan secara anonim/identitas
+`, { parse_mode: 'Markdown' });
+  }
 
-➡️ Gunakan tombol yang tersedia untuk navigasi.
-    `;
-    return ctx.reply(helpMessage, { parse_mode: 'Markdown' });
+  // === MENFES HANDLER ===
+  if (ctx.session.menfes?.status === 'menunggu_pesan') {
+    const pesan = text;
+    const mode = ctx.session.menfes.mode;
+    ctx.session.menfes = null;
+
+    if (mode === 'Anonim') {
+      await bot.telegram.sendMessage(
+        PUBLIC_CHANNEL_ID,
+        `📨 *Menfes baru!*\n\n${pesan}`,
+        { parse_mode: 'Markdown' }
+      );
+    } else {
+      const tombol = Markup.inlineKeyboard([
+        [Markup.button.url(mode, `https://t.me/${mode.replace('@', '')}`)]
+      ]);
+      await bot.telegram.sendMessage(
+        PUBLIC_CHANNEL_ID,
+        `📨 *Menfes dari ${mode}:*\n\n${pesan}`,
+        {
+          parse_mode: 'Markdown',
+          reply_markup: tombol.reply_markup,
+        }
+      );
+    }
+
+    return ctx.reply('✅ Menfes kamu sudah dikirim ke channel!');
   }
 
   if (rating && rating.stage === 'menunggu_token') {
@@ -183,8 +244,8 @@ bot.on('text', async (ctx) => {
     const captionText = userCaption ? `\n📝 Catatan: ${userCaption}` : '';
     const fullCaption = captionPrefix + captionText;
 
+    let msg;
     try {
-      let msg;
       if (fileType === 'document') {
         msg = await ctx.replyWithDocument(fileId, { caption: fullCaption, parse_mode: 'Markdown' });
       } else if (fileType === 'photo') {
@@ -195,7 +256,7 @@ bot.on('text', async (ctx) => {
 
       setTimeout(() => {
         ctx.deleteMessage(msg.message_id).catch(() => {});
-      }, 5000);
+      }, 15000);
 
       data.views++;
       if (data.views >= maxViews) {
@@ -210,11 +271,7 @@ bot.on('text', async (ctx) => {
       const buttons = Array.from({ length: 10 }, (_, i) =>
         Markup.button.callback(`${i + 1}`, `RATE_${i + 1}`)
       );
-
-      await ctx.reply(
-        '📝 Beri rating:',
-        Markup.inlineKeyboard([buttons.slice(0, 5), buttons.slice(5)])
-      );
+      await ctx.reply('📝 Beri rating:', Markup.inlineKeyboard([buttons.slice(0, 5), buttons.slice(5)]));
     } catch (err) {
       console.error('Gagal kirim media:', err);
       return ctx.reply('❌ Gagal menampilkan media.');
@@ -226,6 +283,7 @@ bot.on('text', async (ctx) => {
   ctx.reply('⚠️ Perintah tidak dikenali. Ketik /help untuk daftar perintah yang tersedia.');
 });
 
+// === TOMBOL RATING ===
 bot.action(/^RATE_(\d+)$/, async (ctx) => {
   await ctx.answerCbQuery();
   const ratingValue = parseInt(ctx.match[1]);
@@ -261,6 +319,53 @@ bot.action(/^RATE_(\d+)$/, async (ctx) => {
   }
 });
 
+// === MENFES ===
+bot.action('MENFES', async (ctx) => {
+  await ctx.answerCbQuery();
+  await ctx.editMessageText(
+    'Ingin kirim menfes sebagai?',
+    Markup.inlineKeyboard([
+      [Markup.button.callback('🙈 Anonim', 'MENFES_ANON')],
+      [Markup.button.callback('🪪 Identitas', 'MENFES_ID')],
+      [Markup.button.callback('🔙 Kembali', 'BACK_TO_MENU')],
+    ])
+  );
+});
+
+bot.action('MENFES_ANON', async (ctx) => {
+  await ctx.answerCbQuery();
+  ctx.session.menfes = { mode: 'Anonim', status: 'menunggu_pesan' };
+
+  const text = '✅ Kamu kirim sebagai: *Anonim*\n\nKetik sekarang pesan yang ingin kamu kirim.';
+
+  try {
+    await ctx.editMessageText(text, { parse_mode: 'Markdown' });
+  } catch (err) {
+    if (!err.description.includes('message is not modified')) {
+      console.warn('MENFES_ANON error:', err.description);
+    }
+    await ctx.reply(text, { parse_mode: 'Markdown' });
+  }
+});
+
+bot.action('MENFES_ID', async (ctx) => {
+  await ctx.answerCbQuery();
+  const username = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name;
+  ctx.session.menfes = { mode: username, status: 'menunggu_pesan' };
+
+  const text = `✅ Kamu kirim sebagai: *${username}*\n\nKetik sekarang pesan yang ingin kamu kirim.`;
+
+  try {
+    await ctx.editMessageText(text, { parse_mode: 'Markdown' });
+  } catch (err) {
+    if (!err.description.includes('message is not modified')) {
+      console.warn('MENFES_ID error:', err.description);
+    }
+    await ctx.reply(text, { parse_mode: 'Markdown' });
+  }
+});
+
+// === REPORT ===
 bot.command('report', (ctx) => {
   const parts = ctx.message.text.split(' ');
   const token = parts[1];
@@ -277,7 +382,7 @@ bot.command('report', (ctx) => {
   ctx.reply('✅ Laporan kamu telah dikirim ke admin.');
 });
 
-// Optional: Hapus otomatis token yang kadaluarsa setiap 30 menit
+// === AUTOCLEAN TOKEN KADALUARSA ===
 setInterval(() => {
   const now = Date.now();
   for (const [token, data] of mediaStore.entries()) {
@@ -287,5 +392,6 @@ setInterval(() => {
   }
 }, 30 * 60 * 1000); // setiap 30 menit
 
+// === LAUNCH ===
 bot.launch();
 console.log('🤖 Bot aktif!');
